@@ -421,6 +421,7 @@ typedef struct CoreData {
             int exitKey;                    // Default exit key
             char currentKeyState[MAX_KEYBOARD_KEYS];        // Registers current frame key state
             char previousKeyState[MAX_KEYBOARD_KEYS];       // Registers previous frame key state
+            char repeatedKeyState[MAX_KEYBOARD_KEYS];        // Registers repeated key state
 
             int keyPressedQueue[MAX_KEY_PRESSED_QUEUE];     // Input keys queue
             int keyPressedQueueCount;       // Input keys queue count
@@ -428,6 +429,8 @@ typedef struct CoreData {
             int charPressedQueue[MAX_CHAR_PRESSED_QUEUE];   // Input characters queue (unicode)
             int charPressedQueueCount;      // Input characters queue count
 
+            int keyRepeatedQueue[MAX_KEY_REPEATED_QUEUE];     // Input keys repeated queue
+            int keyRepeatedQueueCount;       // Input keys repeated queue count
 #if defined(PLATFORM_RPI) || defined(PLATFORM_DRM)
             int defaultMode;                // Default keyboard mode
 #if defined(SUPPORT_SSH_KEYBOARD_RPI)
@@ -3473,6 +3476,16 @@ bool IsKeyUp(int key)
     else return false;
 }
 
+// Check if a key has been repeated
+bool IsKeyRepeated(int key)
+{
+    bool repeated = false;
+
+    if (CORE.Input.Keyboard.repeatedKeyState[key] == 1) repeated = true;
+
+    return repeated;
+}
+
 // Get the last key pressed
 int GetKeyPressed(void)
 {
@@ -3512,6 +3525,28 @@ int GetCharPressed(void)
         // Reset last character in the queue
         CORE.Input.Keyboard.charPressedQueue[CORE.Input.Keyboard.charPressedQueueCount] = 0;
         CORE.Input.Keyboard.charPressedQueueCount--;
+    }
+
+    return value;
+}
+
+// Get the last key pressed with repeat rate
+int GetKeyRepeated(void)
+{
+    int value = 0;
+
+    if (CORE.Input.Keyboard.keyRepeatedQueueCount > 0)
+    {
+        // Get character from the queue head
+        value = CORE.Input.Keyboard.keyRepeatedQueue[0];
+
+        // Shift elements 1 step toward the head.
+        for (int i = 0; i < (CORE.Input.Keyboard.keyRepeatedQueueCount - 1); i++)
+            CORE.Input.Keyboard.keyRepeatedQueue[i] = CORE.Input.Keyboard.keyRepeatedQueue[i + 1];
+
+        // Reset last character in the queue
+        CORE.Input.Keyboard.keyRepeatedQueue[CORE.Input.Keyboard.keyRepeatedQueueCount] = 0;
+        CORE.Input.Keyboard.keyRepeatedQueueCount--;
     }
 
     return value;
@@ -4855,6 +4890,7 @@ void PollInputEvents(void)
     // Reset keys/chars pressed registered
     CORE.Input.Keyboard.keyPressedQueueCount = 0;
     CORE.Input.Keyboard.charPressedQueueCount = 0;
+    CORE.Input.Keyboard.keyRepeatedQueueCount = 0;
 
 #if !(defined(PLATFORM_RPI) || defined(PLATFORM_DRM))
     // Reset last gamepad button/axis registered state
@@ -4867,6 +4903,8 @@ void PollInputEvents(void)
     for (int i = 0; i < MAX_KEYBOARD_KEYS; i++) CORE.Input.Keyboard.previousKeyState[i] = CORE.Input.Keyboard.currentKeyState[i];
 
     PollKeyboardEvents();
+
+    memset(CORE.Input.Keyboard.repeatedKeyState, 0, MAX_KEYBOARD_KEYS * (sizeof(char)));
 
     // Register previous mouse states
     CORE.Input.Mouse.previousWheelMove = CORE.Input.Mouse.currentWheelMove;
@@ -4897,6 +4935,7 @@ void PollInputEvents(void)
     // Register previous mouse states
     for (int i = 0; i < MAX_MOUSE_BUTTONS; i++) CORE.Input.Mouse.previousButtonState[i] = CORE.Input.Mouse.currentButtonState[i];
 
+    memset(CORE.Input.Keyboard.repeatedKeyState, 0, MAX_KEYBOARD_KEYS * (sizeof(char)));
     // Register previous mouse wheel state
     CORE.Input.Mouse.previousWheelMove = CORE.Input.Mouse.currentWheelMove;
     CORE.Input.Mouse.currentWheelMove = (Vector2){ 0.0f, 0.0f };
@@ -5077,6 +5116,7 @@ void PollInputEvents(void)
     // NOTE: Android supports up to 260 keys
     for (int i = 0; i < 260; i++) CORE.Input.Keyboard.previousKeyState[i] = CORE.Input.Keyboard.currentKeyState[i];
 
+    memset(CORE.Input.Keyboard.repeatedKeyState, 0, 260 * (sizeof(char)));
     // Android ALooper_pollAll() variables
     int pollResult = 0;
     int pollEvents = 0;
@@ -5271,12 +5311,22 @@ static void KeyCallback(GLFWwindow *window, int key, int scancode, int action, i
     if (action == GLFW_RELEASE) CORE.Input.Keyboard.currentKeyState[key] = 0;
     else CORE.Input.Keyboard.currentKeyState[key] = 1;
 
+    if (action != GLFW_RELEASE) CORE.Input.Keyboard.repeatedKeyState[key] = 1;
+
     // Check if there is space available in the key queue
     if ((CORE.Input.Keyboard.keyPressedQueueCount < MAX_KEY_PRESSED_QUEUE) && (action == GLFW_PRESS))
     {
         // Add character to the queue
         CORE.Input.Keyboard.keyPressedQueue[CORE.Input.Keyboard.keyPressedQueueCount] = key;
         CORE.Input.Keyboard.keyPressedQueueCount++;
+    }
+
+    // Check if there is space available in the repeated key queue
+    if ((CORE.Input.Keyboard.keyRepeatedQueueCount < MAX_KEY_REPEATED_QUEUE) && (action == GLFW_REPEAT || action == GLFW_PRESS))
+    {
+        // Add character to the queue
+        CORE.Input.Keyboard.keyRepeatedQueue[CORE.Input.Keyboard.keyRepeatedQueueCount] = key;
+        CORE.Input.Keyboard.keyRepeatedQueueCount++;
     }
 
     // Check the exit key to set close window
